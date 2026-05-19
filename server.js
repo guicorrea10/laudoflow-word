@@ -147,7 +147,7 @@ async function montarDocumento(laudo, perfil, fotos) {
             spacing: { before: 240, after: 80, line: LINHA_SIMPLES },
             children: [new ImageRun({ data: uint8, type: tipo, transformation: { width: 420, height: 315 } })],
           }));
-          const leg = foto.texto_laudo ? foto.texto_laudo.slice(0, 120) : `Figura ${idx + 1}`;
+          const leg = foto.texto_ia ? String(foto.texto_ia).slice(0, 120) : (foto.observacao_engenheiro ? String(foto.observacao_engenheiro).slice(0, 80) : `Figura ${idx + 1}`);
           filhos.push(new Paragraph({
             alignment: AlignmentType.CENTER,
             spacing: { before: 60, after: 280, line: LINHA_SIMPLES },
@@ -295,7 +295,8 @@ function pVazio() {
   });
 }
 function parseBold(texto) {
-  return texto.split(/\*\*(.*?)\*\*/g).map((p, i) =>
+  if (!texto) return [new TextRun({ text: '', font: F, size: PT12 })];
+  return String(texto).split(/\*\*(.*?)\*\*/g).map((p, i) =>
     new TextRun({ text: p, font: F, size: PT12, bold: i % 2 === 1 })
   );
 }
