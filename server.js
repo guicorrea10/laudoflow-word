@@ -134,8 +134,17 @@ async function montarDocumento(laudo, perfil, fotos) {
         const bucketPath = storagePath.startsWith('laudos/')
           ? storagePath.slice('laudos/'.length)  // remove prefixo do bucket
           : storagePath;
-        console.log(`Tentando baixar: bucket=laudos path=${bucketPath}`);
-        const { data: imgData, error: imgErr } = await supabase.storage.from('laudos').download(bucketPath);
+        
+        const { data: urlData } = supabase.storage.from('laudos').getPublicUrl(bucketPath);
+        const publicUrl = urlData?.publicUrl;
+        console.log('URL publica:', publicUrl);
+        let imgData = null, imgErr = null;
+        if (publicUrl) {
+          try {
+            const resp = await fetch(publicUrl);
+            if (resp.ok) { imgData = await resp.blob(); } else { imgErr = { message: 'HTTP ' + resp.status }; }
+          } catch(fe) { imgErr = { message: fe.message }; }
+        } else { imgErr = { message: 'sem URL publica' }; }
         if (imgErr) { console.error(`Storage error foto ${idx+1}:`, imgErr.message, imgErr.statusCode); }
         if (!imgErr && imgData) {
           const ab = await imgData.arrayBuffer();
