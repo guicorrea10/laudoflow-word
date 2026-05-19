@@ -134,7 +134,9 @@ async function montarDocumento(laudo, perfil, fotos) {
         const bucketPath = storagePath.startsWith('laudos/')
           ? storagePath.slice('laudos/'.length)  // remove prefixo do bucket
           : storagePath;
+        console.log(`Tentando baixar: bucket=laudos path=${bucketPath}`);
         const { data: imgData, error: imgErr } = await supabase.storage.from('laudos').download(bucketPath);
+        if (imgErr) { console.error(`Storage error foto ${idx+1}:`, imgErr.message, imgErr.statusCode); }
         if (!imgErr && imgData) {
           const ab = await imgData.arrayBuffer();
           const uint8 = new Uint8Array(ab);
@@ -152,7 +154,7 @@ async function montarDocumento(laudo, perfil, fotos) {
             children: [new TextRun({ text: `Figura ${idx + 1} – ${leg}`, font: F, size: PT10, italics: true })],
           }));
         }
-      } catch (e) { console.warn(`Foto ${idx + 1}:`, e.message); }
+      } catch (e) { console.error(`ERRO FOTO ${idx + 1}:`, e.message); }
     }
   }
 
