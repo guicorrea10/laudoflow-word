@@ -208,20 +208,24 @@ async function montarDocumento(laudo, perfil, fotos) {
   // ── CORPO ───────────────────────────────────────────────────
   if (laudo.texto_laudo) {
     const linhas = laudo.texto_laudo.split('\n');
-    // Filtrar bloco de cabeçalho interno gerado pela IA
-    // (tudo antes da primeira seção numerada real: "# 1." ou "## 1.")
-    let iniciou = false;
-    for (const linha of linhas) {
+    
+    // FILTRO RIGOROSO: encontrar PRIMEIRA linha seção numerada real
+    // Padrão: "# 1. Título" ou "## 1. Título" ou "### 1. Título"
+    // Remove tudo ANTES (cabeçalho interno, metadados da IA)
+    let primeiraSecaoIdx = -1;
+    for (let i = 0; i < linhas.length; i++) {
+      const trim = linhas[i].trim();
+      if (/^#{1,3}\s+\d+[\.\s]/.test(trim)) {
+        primeiraSecaoIdx = i;
+        break;
+      }
+    }
+
+    const linhasProcessar = primeiraSecaoIdx >= 0 ? linhas.slice(primeiraSecaoIdx) : linhas;
+
+    for (const linha of linhasProcessar) {
       const trim = linha.trim();
       if (!trim || trim === '---') continue;
-
-      // Detectar início do conteúdo real (seção numerada)
-      if (!iniciou) {
-        const ehSecaoReal = /^#{1,3}\s*\d+[\.\s]/.test(trim) ||
-                            /^#{1,3}\s+[A-ZÁÉÍÓÚÃÕÂÊÔÇÜ]/.test(trim);
-        if (!ehSecaoReal) continue;
-        iniciou = true;
-      }
 
       if (trim.startsWith('### ')) {
         filhos.push(paraH3(trim.replace(/^#+\s*/, '')));
@@ -284,6 +288,21 @@ async function montarDocumento(laudo, perfil, fotos) {
       } catch (e) { console.warn(`Foto ${idx + 1}:`, e.message); }
     }
   }
+
+  // ── ANEXOS ──────────────────────────────────────────────────────
+  filhos.push(new Paragraph({ children: [new PageBreak()] }));
+  filhos.push(paraH1('ANEXOS'));
+  
+  filhos.push(paraCorpo(
+    'Os documentos a seguir relacionados constituem anexos do presente laudo, integrando-o para todos os fins:'
+  ));
+  
+  filhos.push(pVazio());
+  
+  // Espaço em branco para engenheiro preencher manualmente
+  filhos.push(paraCorpo(''));
+  filhos.push(paraCorpo(''));
+  filhos.push(paraCorpo(''));
 
   // ── ENCERRAMENTO / ASSINATURA ────────────────────────────────
   filhos.push(new Paragraph({ children: [new PageBreak()] }));
