@@ -133,10 +133,13 @@ function makeFooter() {
 }
 
 app.post('/gerar-docx', async (req, res) => {
-  const { laudo_id } = req.body;
-  if (!laudo_id) return res.status(400).json({ error: 'laudo_id obrigatório' });
-
   try {
+    const { laudo_id } = req.body;
+    
+    if (!laudo_id) {
+      return res.status(400).json({ error: 'laudo_id obrigatório' });
+    }
+
     const laudos = await supabaseGet(`laudos?id=eq.${laudo_id}&select=*`);
     const laudo = laudos[0];
     if (!laudo) return res.status(404).json({ error: 'Laudo não encontrado' });
@@ -233,6 +236,7 @@ app.post('/gerar-docx', async (req, res) => {
 
     const buffer = await Packer.toBuffer(doc);
     const filename = `laudo_${(laudo.titulo || laudo_id).replace(/[^a-z0-9_.\-]/gi, '_')}.docx`;
+    
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Access-Control-Allow-Origin', '*');
