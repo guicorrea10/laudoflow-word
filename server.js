@@ -130,12 +130,17 @@ async function montarDocumento(laudo, perfil, fotos) {
     for (let idx = 0; idx < fotos.length; idx++) {
       const foto = fotos[idx];
       try {
-        const path = foto.storage_path || foto.url?.split('/fotos/')[1];
-        const { data: imgData, error: imgErr } = await supabase.storage.from('fotos').download(path);
+        // url salva como caminho relativo no bucket 'laudos'
+        // ex: "laudos/cc56bc0c-.../foto.png"
+        const storagePath = foto.url || '';
+        const bucketPath = storagePath.startsWith('laudos/')
+          ? storagePath.slice('laudos/'.length)  // remove prefixo do bucket
+          : storagePath;
+        const { data: imgData, error: imgErr } = await supabase.storage.from('laudos').download(bucketPath);
         if (!imgErr && imgData) {
           const ab = await imgData.arrayBuffer();
           const uint8 = new Uint8Array(ab);
-          const ext = (path || '').split('.').pop()?.toLowerCase();
+          const ext = (storagePath || '').split('.').pop()?.toLowerCase();
           const tipo = ext === 'png' ? 'png' : 'jpeg';
           filhos.push(new Paragraph({
             alignment: AlignmentType.CENTER,
