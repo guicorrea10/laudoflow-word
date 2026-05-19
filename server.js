@@ -1,331 +1,303 @@
 const express = require('express');
-const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, PageBreak, ImageRun, Header, Footer, PageNumber, NumberFormat, Table, TableRow, TableCell, WidthType, BorderStyle } = require('docx');
+const {
+  Document, Packer, Paragraph, TextRun, AlignmentType,
+  PageBreak, ImageRun, Header, Footer, PageNumber,
+  BorderStyle, TabStopType, UnderlineType, LevelFormat
+} = require('docx');
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
-
-// ✅ CRÍTICO: Railway injeta PORT dinamicamente — NUNCA hardcode 8080
 const PORT = process.env.PORT || 8080;
-
 app.use(express.json({ limit: '10mb' }));
 
-// Supabase
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_KEY
-);
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
-// ─── Health check ───────────────────────────────────────────
-app.get('/health', (req, res) => {
-  res.json({ ok: true, porta: PORT, ts: new Date().toISOString() });
-});
+const F = 'Arial';
+const PT14 = 28; const PT12 = 24; const PT10 = 20; const PT9 = 18;
+const LINHA_SIMPLES = 240; const LINHA_15 = 360;
+const ESP_PAR = 160; const ESP_SECAO = 320;
+const MARGEM = { top: 1701, bottom: 1134, left: 1701, right: 1134 };
 
-// ─── Gerar DOCX ─────────────────────────────────────────────
+app.get('/health', (req, res) => res.json({ ok: true, porta: PORT }));
+
 app.post('/gerar-docx', async (req, res) => {
   const { laudo_id } = req.body;
-
-  if (!laudo_id) {
-    return res.status(400).json({ erro: 'laudo_id obrigatório', body_recebido: req.body });
-  }
-
+  if (!laudo_id) return res.status(400).json({ erro: 'laudo_id obrigatório' });
   try {
-    // 1. Buscar dados do laudo
-    const { data: laudo, error: laudoErr } = await supabase
-      .from('laudos')
-      .select('*')
-      .eq('id', laudo_id)
-      .single();
-
-    if (laudoErr || !laudo) {
-      return res.status(404).json({ erro: 'Laudo não encontrado', detalhe: laudoErr?.message });
-    }
-
-    // 2. Buscar perfil do engenheiro
-    const { data: perfil } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', laudo.user_id)
-      .single();
-
-    // 3. Buscar fotos
-    const { data: fotos } = await supabase
-      .from('fotos')
-      .select('*')
-      .eq('laudo_id', laudo_id)
-      .order('ordem', { ascending: true });
-
-    // 4. Montar documento Word
+    const { data: laudo, error: le } = await supabase.from('laudos').select('*').eq('id', laudo_id).single();
+    if (le || !laudo) return res.status(404).json({ erro: 'Laudo não encontrado' });
+    const { data: perfil } = await supabase.from('profiles').select('*').eq('id', laudo.user_id).single();
+    const { data: fotos } = await supabase.from('fotos').select('*').eq('laudo_id', laudo_id).order('ordem', { ascending: true });
     const doc = await montarDocumento(laudo, perfil, fotos || []);
-
-    // 5. Gerar buffer e retornar
     const buffer = await Packer.toBuffer(doc);
-
-    const nomeArquivo = `laudo_${laudo_id.slice(0, 8)}.docx`;
-
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    res.setHeader('Content-Disposition', `attachment; filename="${nomeArquivo}"`);
-    res.setHeader('Content-Length', buffer.length);
+    res.setHeader('Content-Disposition', `attachment; filename="laudo_${laudo_id.slice(0,8)}.docx"`);
     res.send(buffer);
-
   } catch (err) {
-    console.error('Erro ao gerar DOCX:', err);
-    res.status(500).json({ erro: 'Erro interno ao gerar documento', detalhe: err.message });
+    console.error(err);
+    res.status(500).json({ erro: err.message });
   }
 });
 
-// ─── Montagem do documento ───────────────────────────────────
 async function montarDocumento(laudo, perfil, fotos) {
-  const engNome = perfil?.nome_completo || 'Engenheiro';
-  const engCrea = perfil?.crea || '';
-  const engUf = perfil?.uf || 'SP';
-
-  const secoes = [];
+  const nome   = perfil?.nome_completo || 'Engenheiro';
+  const crea   = perfil?.crea || '';
+  const uf     = perfil?.uf || 'SP';
+  const tel    = perfil?.telefone || '';
+  const email  = perfil?.email || '';
+  const cidade = laudo.cidade || 'São Paulo';
+  const titulo = (laudo.titulo || 'LAUDO TÉCNICO DE VISTORIA DE CONSTATAÇÃO').toUpperCase();
+  const filhos = [];
 
   // CAPA
-  secoes.push(
-    new Paragraph({
-      children: [new TextRun({ text: '', break: 1 })],
-    }),
-    new Paragraph({
-      text: laudo.titulo || 'LAUDO TÉCNICO DE VISTORIA',
-      heading: HeadingLevel.TITLE,
-      alignment: AlignmentType.CENTER,
-      spacing: { before: 2400, after: 400 },
-    }),
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      children: [
-        new TextRun({ text: laudo.tipo_laudo || '', size: 24, bold: false }),
-      ],
-      spacing: { after: 800 },
-    }),
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      children: [
-        new TextRun({ text: laudo.endereco || '', size: 24 }),
-      ],
-      spacing: { after: 400 },
-    }),
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      children: [
-        new TextRun({ text: `Cliente: ${laudo.cliente || ''}`, size: 24 }),
-      ],
-      spacing: { after: 400 },
-    }),
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      children: [
-        new TextRun({ text: `Data: ${formatarData(laudo.data_vistoria)}`, size: 24 }),
-      ],
-      spacing: { after: 800 },
-    }),
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      children: [
-        new TextRun({ text: `${engNome}`, size: 24, bold: true }),
-      ],
-    }),
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      children: [
-        new TextRun({ text: `CREA-${engUf} ${engCrea}`, size: 24 }),
-      ],
-      spacing: { after: 400 },
-    }),
-    // Quebra de página após capa
-    new Paragraph({ children: [new PageBreak()] }),
-  );
+  filhos.push(pVazio());
+  filhos.push(pVazio());
 
-  // TEXTO DO LAUDO (gerado pela IA)
+  // Título sublinhado e negrito
+  filhos.push(new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: { before: 0, after: 600, line: LINHA_SIMPLES },
+    children: [new TextRun({ text: titulo, font: F, size: PT14, bold: true, underline: { type: UnderlineType.SINGLE } })],
+  }));
+
+  filhos.push(pVazio());
+
+  if (laudo.endereco) filhos.push(new Paragraph({
+    alignment: AlignmentType.JUSTIFIED,
+    spacing: { before: 0, after: 320, line: LINHA_15 },
+    children: [
+      new TextRun({ text: 'OBJETO DA VISTORIA', font: F, size: PT12, bold: true, underline: { type: UnderlineType.SINGLE } }),
+      new TextRun({ text: ': ' + laudo.endereco + '.', font: F, size: PT12 }),
+    ],
+  }));
+
+  if (laudo.data_vistoria) filhos.push(new Paragraph({
+    alignment: AlignmentType.JUSTIFIED,
+    spacing: { before: 0, after: 600, line: LINHA_15 },
+    children: [
+      new TextRun({ text: 'DATA DA VISTORIA', font: F, size: PT12, bold: true, underline: { type: UnderlineType.SINGLE } }),
+      new TextRun({ text: ': ' + formatarData(laudo.data_vistoria) + '.', font: F, size: PT12 }),
+    ],
+  }));
+
+  filhos.push(pVazio());
+
+  filhos.push(new Paragraph({
+    alignment: AlignmentType.JUSTIFIED,
+    spacing: { before: 0, after: ESP_PAR, line: LINHA_15 },
+    indent: { firstLine: 720 },
+    children: [
+      new TextRun({ text: nome.toUpperCase(), font: F, size: PT12, bold: true }),
+      new TextRun({ text: `, Engenheiro Civil, portador do CREA nº. ${crea}, procedeu à vistoria técnica do imóvel. Apresenta o `, font: F, size: PT12 }),
+      new TextRun({ text: titulo, font: F, size: PT12, bold: true }),
+      new TextRun({ text: ' em anexo.', font: F, size: PT12 }),
+    ],
+  }));
+
+  if (laudo.cliente) filhos.push(new Paragraph({
+    alignment: AlignmentType.JUSTIFIED,
+    spacing: { before: 0, after: ESP_PAR, line: LINHA_15 },
+    indent: { firstLine: 720 },
+    children: [
+      new TextRun({ text: 'Solicitante: ', font: F, size: PT12, bold: true }),
+      new TextRun({ text: laudo.cliente + '.', font: F, size: PT12 }),
+    ],
+  }));
+
+  // Quebra de página
+  filhos.push(new Paragraph({ children: [new PageBreak()] }));
+
+  // CORPO
   if (laudo.texto_laudo) {
     const linhas = laudo.texto_laudo.split('\n');
-    for (const linha of linhas) {
-      const trimmed = linha.trim();
-      if (!trimmed) {
-        secoes.push(new Paragraph({ text: '' }));
-        continue;
-      }
-
-      // Detectar headings markdown
-      if (trimmed.startsWith('### ')) {
-        secoes.push(new Paragraph({
-          text: trimmed.replace('### ', ''),
-          heading: HeadingLevel.HEADING_3,
-          spacing: { before: 400, after: 200 },
-        }));
-      } else if (trimmed.startsWith('## ')) {
-        secoes.push(new Paragraph({
-          text: trimmed.replace('## ', ''),
-          heading: HeadingLevel.HEADING_2,
-          spacing: { before: 600, after: 200 },
-        }));
-      } else if (trimmed.startsWith('# ')) {
-        secoes.push(new Paragraph({
-          text: trimmed.replace('# ', ''),
-          heading: HeadingLevel.HEADING_1,
-          spacing: { before: 800, after: 400 },
-          pageBreakBefore: true,
-        }));
-      } else if (trimmed.startsWith('**') && trimmed.endsWith('**')) {
-        secoes.push(new Paragraph({
-          children: [new TextRun({ text: trimmed.replace(/\*\*/g, ''), bold: true, size: 24 })],
-          spacing: { before: 200, after: 200 },
-        }));
-      } else {
-        secoes.push(new Paragraph({
-          children: [new TextRun({ text: trimmed, size: 24 })],
-          spacing: { after: 200 },
-          indent: { left: 0 },
-        }));
-      }
+    for (let i = 0; i < linhas.length; i++) {
+      const linha = linhas[i];
+      const trim = linha.trim();
+      if (!trim || trim === '---') continue;
+      if (trim.startsWith('### ')) { filhos.push(paraSubsubsecao(trim.replace(/^#+\s*/, ''))); continue; }
+      if (trim.startsWith('## '))  { filhos.push(paraSubsecao(trim.replace(/^#+\s*/, '')));    continue; }
+      if (trim.startsWith('# '))   { filhos.push(paraSecao(trim.replace(/^#+\s*/, '')));       continue; }
+      if (trim.startsWith('- '))   { filhos.push(paraLista(trim.slice(2), linha));             continue; }
+      if (/^[a-z]\)/.test(trim) || /^\d+\./.test(trim)) { filhos.push(paraListaNum(trim));    continue; }
+      filhos.push(paraCorpo(trim));
     }
   }
 
-  // FOTOS (se houver)
+  // FOTOS
   if (fotos.length > 0) {
-    secoes.push(
-      new Paragraph({ children: [new PageBreak()] }),
-      new Paragraph({
-        text: 'REGISTROS FOTOGRÁFICOS',
-        heading: HeadingLevel.HEADING_1,
-        spacing: { before: 400, after: 400 },
-      }),
-    );
-
-    for (let i = 0; i < fotos.length; i++) {
-      const foto = fotos[i];
+    filhos.push(new Paragraph({ children: [new PageBreak()] }));
+    filhos.push(paraSecao('MEMORIAL FOTOGRÁFICO'));
+    for (let idx = 0; idx < fotos.length; idx++) {
+      const foto = fotos[idx];
       try {
-        // Baixar imagem do Supabase Storage
-        const { data: imgData, error: imgErr } = await supabase.storage
-          .from('fotos')
-          .download(foto.storage_path || foto.url?.split('/fotos/')[1]);
-
+        const path = foto.storage_path || foto.url?.split('/fotos/')[1];
+        const { data: imgData, error: imgErr } = await supabase.storage.from('fotos').download(path);
         if (!imgErr && imgData) {
-          const arrayBuffer = await imgData.arrayBuffer();
-          const uint8 = new Uint8Array(arrayBuffer);
-
-          secoes.push(
-            new Paragraph({
-              children: [
-                new ImageRun({
-                  data: uint8,
-                  transformation: { width: 400, height: 300 },
-                }),
-              ],
-              alignment: AlignmentType.CENTER,
-              spacing: { before: 400, after: 200 },
-            }),
-            new Paragraph({
-              alignment: AlignmentType.CENTER,
-              children: [
-                new TextRun({
-                  text: `Foto ${i + 1}${foto.texto_laudo ? ' — ' + foto.texto_laudo.slice(0, 80) : ''}`,
-                  size: 20,
-                  italics: true,
-                }),
-              ],
-              spacing: { after: 400 },
-            }),
-          );
+          const ab = await imgData.arrayBuffer();
+          const uint8 = new Uint8Array(ab);
+          const ext = (path || '').split('.').pop()?.toLowerCase();
+          const tipo = ext === 'png' ? 'png' : 'jpeg';
+          filhos.push(new Paragraph({
+            alignment: AlignmentType.CENTER,
+            spacing: { before: 240, after: 80, line: LINHA_SIMPLES },
+            children: [new ImageRun({ data: uint8, type: tipo, transformation: { width: 420, height: 315 } })],
+          }));
+          const leg = foto.texto_laudo ? foto.texto_laudo.slice(0, 120) : `Figura ${idx + 1}`;
+          filhos.push(new Paragraph({
+            alignment: AlignmentType.CENTER,
+            spacing: { before: 60, after: 280, line: LINHA_SIMPLES },
+            children: [new TextRun({ text: `Figura ${idx + 1} – ${leg}`, font: F, size: PT10, italics: true })],
+          }));
         }
-      } catch (e) {
-        console.warn(`Não foi possível incluir foto ${i + 1}:`, e.message);
-      }
+      } catch (e) { console.warn(`Foto ${idx + 1}:`, e.message); }
     }
   }
 
-  // ASSINATURA FINAL
-  secoes.push(
-    new Paragraph({ children: [new PageBreak()] }),
-    new Paragraph({
-      text: `${laudo.cidade || 'São Paulo'}, ${formatarData(new Date().toISOString())}`,
-      alignment: AlignmentType.RIGHT,
-      spacing: { before: 800, after: 800 },
-      children: [new TextRun({ text: `${laudo.cidade || 'São Paulo'}, ${formatarData(new Date().toISOString())}`, size: 24 })],
-    }),
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: '_'.repeat(50), size: 24 })],
-      spacing: { before: 1200, after: 200 },
-    }),
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: engNome, bold: true, size: 24 })],
-    }),
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: `Engenheiro Civil — CREA-${engUf} ${engCrea}`, size: 24 })],
-    }),
-  );
+  // ASSINATURA
+  filhos.push(pVazio());
+  filhos.push(new Paragraph({
+    alignment: AlignmentType.RIGHT,
+    spacing: { before: 0, after: ESP_PAR, line: LINHA_SIMPLES },
+    children: [new TextRun({ text: `${cidade}, ${formatarData(new Date().toISOString())}`, font: F, size: PT12 })],
+  }));
+  filhos.push(pVazio());
+  filhos.push(new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: { before: 0, after: 60, line: LINHA_SIMPLES },
+    children: [new TextRun({ text: '_'.repeat(48), font: F, size: PT12 })],
+  }));
+  filhos.push(new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: { before: 0, after: 60, line: LINHA_SIMPLES },
+    children: [new TextRun({ text: nome.toUpperCase(), font: F, size: PT12, bold: true })],
+  }));
+  filhos.push(new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: { before: 0, after: 60, line: LINHA_SIMPLES },
+    children: [new TextRun({ text: 'Engenheiro Civil', font: F, size: PT12 })],
+  }));
+  filhos.push(new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: { before: 0, after: 0, line: LINHA_SIMPLES },
+    children: [new TextRun({ text: `CREA-${uf} nº. ${crea}`, font: F, size: PT12 })],
+  }));
 
-  // Montar doc com formatação ABNT
-  const doc = new Document({
+  return new Document({
     styles: {
       default: {
         document: {
-          run: { font: 'Arial', size: 24 }, // 12pt = 24 half-points
-          paragraph: { spacing: { line: 360 } }, // 1,5 entrelinhas
+          run: { font: F, size: PT12 },
+          paragraph: { spacing: { line: LINHA_15, before: 0, after: ESP_PAR } },
         },
       },
     },
     sections: [{
-      properties: {
-        page: {
-          margin: {
-            top: 1701,    // 3cm
-            bottom: 1134, // 2cm
-            left: 1701,   // 3cm
-            right: 1134,  // 2cm
-          },
-        },
-      },
-      headers: {
-        default: new Header({
-          children: [
-            new Paragraph({
-              children: [
-                new TextRun({ text: `${engNome} — CREA-${engUf} ${engCrea}`, size: 20, color: '2563EB' }),
-              ],
-              border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: '2563EB' } },
-            }),
-          ],
-        }),
-      },
-      footers: {
-        default: new Footer({
-          children: [
-            new Paragraph({
-              alignment: AlignmentType.RIGHT,
-              children: [
-                new TextRun({ children: [PageNumber.CURRENT], size: 20 }),
-                new TextRun({ text: ' / ', size: 20 }),
-                new TextRun({ children: [PageNumber.TOTAL_PAGES], size: 20 }),
-              ],
-            }),
-          ],
-        }),
-      },
-      children: secoes,
+      properties: { page: { margin: MARGEM, size: { width: 11906, height: 16838 } } },
+      headers: { default: montarCabecalho(nome, crea) },
+      footers: { default: montarRodape(tel, email) },
+      children: filhos,
     }],
   });
-
-  return doc;
 }
 
-// ─── Helpers ─────────────────────────────────────────────────
+function montarCabecalho(nome, crea) {
+  return new Header({
+    children: [
+      new Paragraph({
+        alignment: AlignmentType.RIGHT,
+        border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: '1E3A5F', space: 4 } },
+        spacing: { before: 0, after: 60, line: LINHA_SIMPLES },
+        children: [new TextRun({ text: nome, font: F, size: PT10, bold: true })],
+      }),
+      new Paragraph({
+        alignment: AlignmentType.RIGHT,
+        spacing: { before: 0, after: 0, line: LINHA_SIMPLES },
+        children: [new TextRun({ text: `Engenheiro Civil  CREA ${crea}`, font: F, size: PT10 })],
+      }),
+    ],
+  });
+}
+
+function montarRodape(tel, email) {
+  return new Footer({
+    children: [
+      new Paragraph({
+        border: { top: { style: BorderStyle.SINGLE, size: 4, color: 'CCCCCC', space: 4 } },
+        spacing: { before: 80, after: 0, line: LINHA_SIMPLES },
+        tabStops: [{ type: TabStopType.RIGHT, position: 9026 }],
+        children: [
+          ...(tel   ? [new TextRun({ text: `✆ ${tel}`, font: F, size: PT9 })]         : []),
+          ...(email ? [new TextRun({ text: `   ✉ ${email}`, font: F, size: PT9 })]    : []),
+          new TextRun({ text: '\t', font: F, size: PT9 }),
+          new TextRun({ text: 'Página ', font: F, size: PT9 }),
+          new TextRun({ children: [PageNumber.CURRENT], font: F, size: PT9 }),
+        ],
+      }),
+    ],
+  });
+}
+
+function paraSecao(texto) {
+  return new Paragraph({
+    alignment: AlignmentType.LEFT,
+    spacing: { before: ESP_SECAO, after: ESP_PAR, line: LINHA_15 },
+    children: [new TextRun({ text: texto.replace(/\*\*/g,''), font: F, size: PT12, bold: true })],
+  });
+}
+function paraSubsecao(texto) {
+  return new Paragraph({
+    alignment: AlignmentType.LEFT,
+    spacing: { before: ESP_PAR + 80, after: ESP_PAR, line: LINHA_15 },
+    children: [new TextRun({ text: texto.replace(/\*\*/g,''), font: F, size: PT12, bold: true })],
+  });
+}
+function paraSubsubsecao(texto) {
+  return new Paragraph({
+    alignment: AlignmentType.LEFT,
+    spacing: { before: ESP_PAR, after: ESP_PAR, line: LINHA_15 },
+    children: [new TextRun({ text: texto.replace(/\*\*/g,''), font: F, size: PT12, bold: true, italics: true })],
+  });
+}
+function paraCorpo(texto) {
+  return new Paragraph({
+    alignment: AlignmentType.JUSTIFIED,
+    spacing: { before: 0, after: ESP_PAR, line: LINHA_15 },
+    indent: { firstLine: 720 },
+    children: parseBold(texto),
+  });
+}
+function paraLista(texto, linhaOriginal) {
+  const nivel = linhaOriginal.match(/^(\s+)/)?.[1]?.length || 0;
+  return new Paragraph({
+    alignment: AlignmentType.JUSTIFIED,
+    spacing: { before: 0, after: 80, line: LINHA_15 },
+    indent: { left: nivel >= 4 ? 1440 : 720, hanging: 360 },
+    children: [new TextRun({ text: '– ', font: F, size: PT12 }), ...parseBold(texto)],
+  });
+}
+function paraListaNum(texto) {
+  return new Paragraph({
+    alignment: AlignmentType.JUSTIFIED,
+    spacing: { before: 0, after: 80, line: LINHA_15 },
+    indent: { left: 720, hanging: 360 },
+    children: parseBold(texto),
+  });
+}
+function pVazio() {
+  return new Paragraph({
+    spacing: { before: 0, after: 0, line: LINHA_SIMPLES },
+    children: [new TextRun({ text: '', font: F, size: PT12 })],
+  });
+}
+function parseBold(texto) {
+  return texto.split(/\*\*(.*?)\*\*/g).map((p, i) =>
+    new TextRun({ text: p, font: F, size: PT12, bold: i % 2 === 1 })
+  );
+}
 function formatarData(iso) {
   if (!iso) return '';
-  try {
-    return new Date(iso).toLocaleDateString('pt-BR', {
-      day: '2-digit', month: 'long', year: 'numeric'
-    });
-  } catch {
-    return iso;
-  }
+  try { return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }); }
+  catch { return iso; }
 }
 
-// ─── Start ───────────────────────────────────────────────────
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`LaudoFlow Word Service rodando na porta ${PORT}`);
-});
+app.listen(PORT, '0.0.0.0', () => console.log(`LaudoFlow Word Service rodando na porta ${PORT}`));
