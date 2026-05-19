@@ -1,3 +1,5 @@
+const https = require("https");
+const http = require("http");
 const express = require("express");
 const docx = require("docx");
 const { Document, Packer, Paragraph, TextRun, AlignmentType, PageBreak, ImageRun, Header, Footer, PageNumber, BorderStyle, UnderlineType } = docx;
@@ -141,14 +143,12 @@ async function montarDocumento(laudo, perfil, fotos) {
         let imgData = null, imgErr = null;
         if (publicUrl) {
           try {
-            const resp = await fetch(publicUrl);
-            if (resp.ok) { imgData = await resp.blob(); } else { imgErr = { message: 'HTTP ' + resp.status }; }
+            imgData = await downloadUrl(publicUrl);
           } catch(fe) { imgErr = { message: fe.message }; }
         } else { imgErr = { message: 'sem URL publica' }; }
         if (imgErr) { console.error(`Storage error foto ${idx+1}:`, imgErr.message, imgErr.statusCode); }
         if (!imgErr && imgData) {
-          const ab = await imgData.arrayBuffer();
-          const uint8 = new Uint8Array(ab);
+          const uint8 = imgData;
           const ext = (storagePath || '').split('.').pop()?.toLowerCase();
           const tipo = ext === 'png' ? 'png' : 'jpeg';
           filhos.push(new Paragraph({
@@ -313,6 +313,23 @@ function formatarData(iso) {
   if (!iso) return '';
   try { return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }); }
   catch { return iso; }
+}
+
+
+function downloadUrl(url) {
+  return new Promise((resolve, reject) => {
+    const lib = url.startsWith('https') ? require('https') : require('http');
+    lib.get(url, (res) => {
+      if (res.statusCode !== 200) {
+        reject(new Error('HTTP ' + res.statusCode));
+        return;
+      }
+      const chunks = [];
+      res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => resolve(Buffer.concat(chunks)));
+      res.on('error', reject);
+    }).on('error', reject);
+  });
 }
 
 app.listen(PORT, '0.0.0.0', () => console.log(`LaudoFlow Word Service rodando na porta ${PORT}`));
