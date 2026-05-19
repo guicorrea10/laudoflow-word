@@ -1,9 +1,7 @@
-const express = require('express');
-const {
-  Document, Packer, Paragraph, TextRun, AlignmentType,
-  PageBreak, ImageRun, Header, Footer, PageNumber,
-  BorderStyle, TabStopType, UnderlineType, LevelFormat
-} = require('docx');
+const express = require("express");
+const docx = require("docx");
+const { Document, Packer, Paragraph, TextRun, AlignmentType, PageBreak, ImageRun, Header, Footer, PageNumber, BorderStyle, UnderlineType } = docx;
+const TabStopType = docx.TabStopType || { RIGHT: "right" };
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
