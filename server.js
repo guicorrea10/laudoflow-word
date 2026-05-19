@@ -133,11 +133,8 @@ async function montarDocumento(laudo, perfil, fotos) {
         // url salva como caminho relativo no bucket 'laudos'
         // ex: "laudos/cc56bc0c-.../foto.png"
         const storagePath = foto.url || '';
-        const bucketPath = storagePath.startsWith('laudos/')
-          ? storagePath.slice('laudos/'.length)  // remove prefixo do bucket
-          : storagePath;
-        
-        const { data: urlData } = supabase.storage.from('laudos').getPublicUrl(bucketPath);
+        // bucket = 'fotos', path = laudos/uuid/arquivo.png (url completa)
+        const { data: urlData } = supabase.storage.from('fotos').getPublicUrl(storagePath);
         const publicUrl = urlData?.publicUrl;
         console.log('URL publica:', publicUrl);
         let imgData = null, imgErr = null;
