@@ -57,10 +57,10 @@ app.post('/gerar-docx', async (req, res) => {
 async function montarDocumento(laudo, perfil, fotos) {
   const nome    = perfil?.nome_completo || 'Engenheiro';
   const crea    = perfil?.crea || '';
-  const uf      = perfil?.uf || 'SP';
-  const empresa = perfil?.empresa || '';
-  const cidade  = laudo.cidade || 'São Paulo';
-  const tipo    = (laudo.tipo_laudo || 'LAUDO DE VISTORIA DE CONSTATAÇÃO').toUpperCase();
+  const uf      = perfil?.uf_crea || 'SP';
+  const empresa = '';
+  const cidade  = perfil?.cidade_atuacao || 'São Paulo';
+  const tipo    = (laudo.tipo || 'LAUDO DE VISTORIA DE CONSTATAÇÃO').toUpperCase();
   const endereco = laudo.endereco || '';
   const cliente  = laudo.cliente || '';
 
