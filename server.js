@@ -202,19 +202,18 @@ async function montarDocumento(laudo, perfil, fotos) {
 
   filhos.push(new Paragraph({ children: [new PageBreak()] }));
 
-  // Pré-download de todas as fotos para reutilizar no corpo e no memorial
+  // Pré-download de todas as fotos via Supabase client (bucket privado — service role)
   const fotoBuffers = new Map(); // idx -> { buf, tipoImg }
   for (let idx = 0; idx < fotos.length; idx++) {
     const foto = fotos[idx];
     try {
       const storagePath = foto.url || '';
-      const { data: urlData } = supabase.storage.from('fotos').getPublicUrl(storagePath);
-      const publicUrl = urlData?.publicUrl;
-      if (publicUrl) {
-        const imgBuf = await downloadUrl(publicUrl);
-        const ext = storagePath.split('.').pop()?.toLowerCase();
-        fotoBuffers.set(idx, { buf: imgBuf, tipoImg: ext === 'png' ? 'png' : 'jpeg' });
-      }
+      if (!storagePath) continue;
+      const { data: fileData, error: fileErr } = await supabase.storage.from('fotos').download(storagePath);
+      if (fileErr) throw fileErr;
+      const imgBuf = Buffer.from(await fileData.arrayBuffer());
+      const ext = storagePath.split('.').pop()?.toLowerCase();
+      fotoBuffers.set(idx, { buf: imgBuf, tipoImg: ext === 'png' ? 'png' : 'jpeg' });
     } catch (e) { console.warn(`Download foto ${idx + 1}:`, e.message); }
   }
 
