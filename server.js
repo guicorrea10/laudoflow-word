@@ -172,7 +172,7 @@ async function montarDocumento(laudo, perfil, fotos) {
           margins: { top: 60, bottom: 120, left: 160, right: 160 },
           children: [
             new Paragraph({ children: [new TextRun({ text: 'Versão', font: F, size: PT10, color: '666666' })] }),
-            new Paragraph({ children: [new TextRun({ text: '1.0', font: F, size: PT12 })] }),
+            new Paragraph({ children: [new TextRun({ text: 'final', font: F, size: PT12, italics: true })] }),
           ],
         }),
       ]}),
@@ -218,8 +218,9 @@ async function montarDocumento(laudo, perfil, fotos) {
   }
 
   function descricaoFoto(foto) {
-    if (foto.observacao_engenheiro) return String(foto.observacao_engenheiro).trim().slice(0, 100);
-    if (foto.texto_ia) return String(foto.texto_ia).replace(/^(?:foto|figura)\s*\d+\s*[-—:]\s*/i, '').trim().slice(0, 100);
+    const limpaDesc = s => String(s).replace(/^(?:foto|figura)\s*\d+\s*[-—:]\s*/i, '').trim().slice(0, 100);
+    if (foto.observacao_engenheiro) return limpaDesc(foto.observacao_engenheiro);
+    if (foto.texto_ia) return limpaDesc(foto.texto_ia);
     return '';
   }
 
@@ -259,12 +260,15 @@ async function montarDocumento(laudo, perfil, fotos) {
     if (primeiraSecaoIdx >= 0) {
       linhasProcessar = linhas.slice(primeiraSecaoIdx);
     } else {
-      // Sem seções numeradas em markdown — pular cabeçalhos de título da IA no início
+      // Sem seções numeradas em markdown — pular cabeçalhos da IA no início
       let skipIdx = 0;
       for (let i = 0; i < linhas.length; i++) {
         const trim = linhas[i].trim();
         if (!trim || trim === '---') { skipIdx = i + 1; continue; }
+        // Pular headings markdown sem número (ex: "# ANÁLISE DE CAUSALIDADE")
         if (/^#{1,3}\s+(?!\d)/.test(trim)) { skipIdx = i + 1; continue; }
+        // Pular linhas em CAIXA ALTA pura (tipo do laudo repetido pela IA, ex: "ANÁLISE DE CAUSALIDADE")
+        if (/^[A-ZÁÀÂÃÉÊÍÓÔÕÚÇÜ\s\-–—\/]+$/.test(trim) && trim.length > 3) { skipIdx = i + 1; continue; }
         break;
       }
       linhasProcessar = linhas.slice(skipIdx);
@@ -310,18 +314,7 @@ async function montarDocumento(laudo, perfil, fotos) {
     }
   }
 
-  filhos.push(new Paragraph({ children: [new PageBreak()] }));
-  filhos.push(paraH1('ANEXOS'));
-  
-  filhos.push(paraCorpo(
-    'Os documentos a seguir relacionados constituem anexos do presente laudo, integrando-o para todos os fins:'
-  ));
-  
-  filhos.push(pVazio());
-  filhos.push(paraCorpo(''));
-  filhos.push(paraCorpo(''));
-  filhos.push(paraCorpo(''));
-
+  // 4. Encerramento + Assinatura
   filhos.push(new Paragraph({ children: [new PageBreak()] }));
   filhos.push(paraH1('ENCERRAMENTO'));
 
@@ -361,6 +354,19 @@ async function montarDocumento(laudo, perfil, fotos) {
     spacing: { before: 0, after: 0, line: L1 },
     children: [new TextRun({ text: `CREA-${uf} ${crea}`, font: F, size: PT12 })],
   }));
+
+  // 5. Anexos
+  filhos.push(new Paragraph({ children: [new PageBreak()] }));
+  filhos.push(paraH1('ANEXOS'));
+
+  filhos.push(paraCorpo(
+    'Os documentos a seguir relacionados constituem anexos do presente laudo, integrando-o para todos os fins:'
+  ));
+
+  filhos.push(pVazio());
+  filhos.push(paraCorpo(''));
+  filhos.push(paraCorpo(''));
+  filhos.push(paraCorpo(''));
 
   filhos.push(pVazio());
 
