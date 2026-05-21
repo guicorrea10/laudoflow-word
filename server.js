@@ -74,10 +74,19 @@ async function montarDocumento(laudo, perfil, fotos) {
 
   filhos.push(new Paragraph({
     alignment: 'center',
-    spacing: { before: 400, after: 400, line: L1 },
+    spacing: { before: 400, after: 200, line: L1 },
+    children: [new TextRun({
+      text: 'LAUDO TÉCNICO',
+      font: F, size: PT18, bold: true, color: '000000',
+    })],
+  }));
+
+  filhos.push(new Paragraph({
+    alignment: 'center',
+    spacing: { before: 0, after: 400, line: L1 },
     children: [new TextRun({
       text: tipo,
-      font: F, size: PT18, bold: true, color: '000000',
+      font: F, size: PT14, color: '444444',
     })],
   }));
 
@@ -162,7 +171,7 @@ async function montarDocumento(laudo, perfil, fotos) {
           margins: { top: 60, bottom: 120, left: 160, right: 160 },
           children: [
             new Paragraph({ children: [new TextRun({ text: 'Versão', font: F, size: PT10, color: '666666' })] }),
-            new Paragraph({ children: [new TextRun({ text: 'final', font: F, size: PT12, italics: true })] }),
+            new Paragraph({ children: [new TextRun({ text: '1.0', font: F, size: PT12 })] }),
           ],
         }),
       ]}),
@@ -319,6 +328,8 @@ async function montarDocumento(laudo, perfil, fotos) {
     spacing: { before: 0, after: 0, line: L1 },
     children: [new TextRun({ text: `CREA-${uf} ${crea}`, font: F, size: PT12 })],
   }));
+
+  filhos.push(pVazio());
 
   return new Document({
     styles: {
