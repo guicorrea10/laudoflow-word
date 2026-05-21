@@ -60,7 +60,8 @@ async function montarDocumento(laudo, perfil, fotos) {
   const uf      = perfil?.uf_crea || 'SP';
   const empresa = '';
   const cidade  = perfil?.cidade_atuacao || 'São Paulo';
-  const tipo    = (laudo.tipo || 'LAUDO DE VISTORIA DE CONSTATAÇÃO').toUpperCase();
+  const rawTipo = laudo.tipo || 'LAUDO DE VISTORIA DE CONSTATAÇÃO';
+  const tipo    = rawTipo.split('\n').map(l => l.replace(/^#+\s*/, '').trim()).filter(Boolean)[0]?.toUpperCase() || 'LAUDO DE VISTORIA DE CONSTATAÇÃO';
   const endereco = laudo.endereco || '';
   const cliente  = laudo.cliente || '';
 
@@ -201,6 +202,49 @@ async function montarDocumento(laudo, perfil, fotos) {
 
   filhos.push(new Paragraph({ children: [new PageBreak()] }));
 
+  // Pré-download de todas as fotos para reutilizar no corpo e no memorial
+  const fotoBuffers = new Map(); // idx -> { buf, tipoImg }
+  for (let idx = 0; idx < fotos.length; idx++) {
+    const foto = fotos[idx];
+    try {
+      const storagePath = foto.url || '';
+      const { data: urlData } = supabase.storage.from('fotos').getPublicUrl(storagePath);
+      const publicUrl = urlData?.publicUrl;
+      if (publicUrl) {
+        const imgBuf = await downloadUrl(publicUrl);
+        const ext = storagePath.split('.').pop()?.toLowerCase();
+        fotoBuffers.set(idx, { buf: imgBuf, tipoImg: ext === 'png' ? 'png' : 'jpeg' });
+      }
+    } catch (e) { console.warn(`Download foto ${idx + 1}:`, e.message); }
+  }
+
+  function descricaoFoto(foto) {
+    if (foto.observacao_engenheiro) return String(foto.observacao_engenheiro).trim().slice(0, 100);
+    if (foto.texto_ia) return String(foto.texto_ia).replace(/^(?:foto|figura)\s*\d+\s*[-—:]\s*/i, '').trim().slice(0, 100);
+    return '';
+  }
+
+  function paragrafosImagem(idx, foto) {
+    const entry = fotoBuffers.get(idx);
+    if (!entry) return [];
+    const desc = descricaoFoto(foto);
+    return [
+      new Paragraph({
+        alignment: 'center',
+        spacing: { before: 400, after: 120, line: L1 },
+        children: [new ImageRun({ data: entry.buf, type: entry.tipoImg, transformation: { width: 440, height: 330 } })],
+      }),
+      new Paragraph({
+        alignment: 'center',
+        spacing: { before: 60, after: 500, line: L1 },
+        children: [
+          new TextRun({ text: `Foto ${idx + 1}`, font: F, size: PT10, bold: true }),
+          ...(desc ? [new TextRun({ text: ' — ', font: F, size: PT10 }), new TextRun({ text: desc, font: F, size: PT10, italics: true })] : []),
+        ],
+      }),
+    ];
+  }
+
   if (laudo.texto_laudo) {
     const linhas = laudo.texto_laudo.split('\n');
     let primeiraSecaoIdx = -1;
@@ -212,11 +256,32 @@ async function montarDocumento(laudo, perfil, fotos) {
       }
     }
 
-    const linhasProcessar = primeiraSecaoIdx >= 0 ? linhas.slice(primeiraSecaoIdx) : linhas;
+    let linhasProcessar;
+    if (primeiraSecaoIdx >= 0) {
+      linhasProcessar = linhas.slice(primeiraSecaoIdx);
+    } else {
+      // Sem seções numeradas em markdown — pular cabeçalhos de título da IA no início
+      let skipIdx = 0;
+      for (let i = 0; i < linhas.length; i++) {
+        const trim = linhas[i].trim();
+        if (!trim || trim === '---') { skipIdx = i + 1; continue; }
+        if (/^#{1,3}\s+(?!\d)/.test(trim)) { skipIdx = i + 1; continue; }
+        break;
+      }
+      linhasProcessar = linhas.slice(skipIdx);
+    }
 
     for (const linha of linhasProcessar) {
       const trim = linha.trim();
       if (!trim || trim === '---') continue;
+
+      // Placeholder de foto inline: [FOTO 1], [FOTO_1], [FIGURA 1], etc.
+      const mFoto = trim.match(/^\[(?:FOTO|FIGURA|IMAGEM)[_\s]*(\d+)\]$/i);
+      if (mFoto) {
+        const fIdx = parseInt(mFoto[1]) - 1;
+        if (fotos[fIdx]) filhos.push(...paragrafosImagem(fIdx, fotos[fIdx]));
+        continue;
+      }
 
       if (trim.startsWith('### ')) {
         filhos.push(paraH3(trim.replace(/^#+\s*/, '')));
@@ -240,40 +305,9 @@ async function montarDocumento(laudo, perfil, fotos) {
 
     for (let idx = 0; idx < fotos.length; idx++) {
       const foto = fotos[idx];
-      try {
-        const storagePath = foto.url || '';
-        const { data: urlData } = supabase.storage.from('fotos').getPublicUrl(storagePath);
-        const publicUrl = urlData?.publicUrl;
-        if (publicUrl) {
-          const imgBuf = await downloadUrl(publicUrl);
-          const ext = storagePath.split('.').pop()?.toLowerCase();
-          const tipo = ext === 'png' ? 'png' : 'jpeg';
-
-          filhos.push(new Paragraph({
-            alignment: 'center',
-            spacing: { before: 400, after: 120, line: L1 },
-            children: [new ImageRun({
-              data: imgBuf,
-              type: tipo,
-              transformation: { width: 440, height: 330 },
-            })],
-          }));
-
-          const descFoto = foto.observacao_engenheiro
-            ? String(foto.observacao_engenheiro).slice(0, 100)
-            : (foto.texto_ia ? String(foto.texto_ia).slice(0, 100) : '');
-
-          filhos.push(new Paragraph({
-            alignment: 'center',
-            spacing: { before: 60, after: 500, line: L1 },
-            children: [
-              new TextRun({ text: `Foto ${idx + 1}`, font: F, size: PT10, bold: true }),
-              ...(descFoto ? [new TextRun({ text: ` — `, font: F, size: PT10 }),
-                              new TextRun({ text: descFoto, font: F, size: PT10, italics: true })] : []),
-            ],
-          }));
-        }
-      } catch (e) { console.warn(`Foto ${idx + 1}:`, e.message); }
+      if (fotoBuffers.has(idx)) {
+        filhos.push(...paragrafosImagem(idx, foto));
+      }
     }
   }
 
