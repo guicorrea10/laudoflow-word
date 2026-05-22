@@ -302,17 +302,6 @@ async function montarDocumento(laudo, perfil, fotos) {
     }
   }
 
-  if (fotos.length > 0) {
-    filhos.push(new Paragraph({ children: [new PageBreak()] }));
-    filhos.push(paraH1('MEMORIAL FOTOGRÁFICO'));
-
-    for (let idx = 0; idx < fotos.length; idx++) {
-      const foto = fotos[idx];
-      if (fotoBuffers.has(idx)) {
-        filhos.push(...paragrafosImagem(idx, foto));
-      }
-    }
-  }
 
   // 4. Encerramento + Assinatura
   filhos.push(new Paragraph({ children: [new PageBreak()] }));
@@ -473,7 +462,7 @@ function paraH3(texto) {
 
 function paraCorpo(texto) {
   return new Paragraph({
-    alignment: 'justified',
+    alignment: 'both',
     spacing: { before: 0, after: PAR, line: L15 },
     children: parseBold(texto),
   });
