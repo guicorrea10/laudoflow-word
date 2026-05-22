@@ -45,9 +45,23 @@ app.post('/gerar-docx', async (req, res) => {
     const { data: fotos } = await supabase.from('fotos').select('*').eq('laudo_id', laudo_id).order('ordem', { ascending: true });
     const doc = await montarDocumento(laudo, perfil, fotos || []);
     const buffer = await Packer.toBuffer(doc);
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    res.setHeader('Content-Disposition', `attachment; filename="laudo_${laudo_id.slice(0,8)}.docx"`);
-    res.send(buffer);
+    const filename = `laudo_${laudo_id.slice(0, 8)}.docx`;
+    const storagePath = `docx/${laudo_id}/${filename}`;
+
+    const { error: uploadErr } = await supabase.storage
+      .from('fotos')
+      .upload(storagePath, buffer, {
+        contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        upsert: true,
+      });
+    if (uploadErr) throw new Error(`Storage upload: ${uploadErr.message}`);
+
+    const { data: signed, error: signErr } = await supabase.storage
+      .from('fotos')
+      .createSignedUrl(storagePath, 3600);
+    if (signErr || !signed) throw new Error(`Signed URL: ${signErr?.message}`);
+
+    res.json({ url: signed.signedUrl, filename });
   } catch (err) {
     console.error(err);
     res.status(500).json({ erro: err.message });
@@ -470,7 +484,7 @@ function paraCorpo(texto) {
 
 function paraBullet(texto, linhaOriginal) {
   return new Paragraph({
-    alignment: 'justified',
+    alignment: 'both',
     numbering: { reference: 'bullets', level: 0 },
     spacing: { before: 0, after: 100, line: L15 },
     children: parseBold(texto),
@@ -479,7 +493,7 @@ function paraBullet(texto, linhaOriginal) {
 
 function paraListaNum(texto) {
   return new Paragraph({
-    alignment: 'justified',
+    alignment: 'both',
     spacing: { before: 0, after: 100, line: L15 },
     indent: { left: 720, hanging: 360 },
     children: parseBold(texto),
