@@ -224,21 +224,25 @@ async function montarDocumento(laudo, perfil, fotos) {
       const storagePath = foto.url || '';
       if (!storagePath) continue;
       console.log(`[foto ${idx + 1}] downloading: ${storagePath}`);
+      const ext = storagePath.split('.').pop().toLowerCase();
+      const tipoOriginal = ext === 'png' ? 'png' : 'jpeg';
       const { data: fileData, error: fileErr } = await supabase.storage.from('fotos').download(storagePath);
       if (fileErr) throw fileErr;
       const imgBuf = Buffer.from(await fileData.arrayBuffer());
 
       let resizedBuf = imgBuf;
+      let tipoImg = tipoOriginal;
       try {
         resizedBuf = await sharp(imgBuf)
           .resize(1200, 900, { fit: 'inside', withoutEnlargement: true })
           .jpeg({ quality: 85 })
           .toBuffer();
+        tipoImg = 'jpeg';
       } catch (sharpErr) {
         console.warn(`Sharp resize foto ${idx + 1}:`, sharpErr.message);
       }
 
-      fotoBuffers.set(idx, { buf: resizedBuf, tipoImg: 'jpeg' });
+      fotoBuffers.set(idx, { buf: resizedBuf, tipoImg });
     } catch (e) { console.error(`[foto ${idx + 1}] erro no download:`, e); }
   }
 
