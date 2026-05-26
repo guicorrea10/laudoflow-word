@@ -4,6 +4,7 @@ const https_mod = require("https");
 const http_mod = require("http");
 const express = require("express");
 const docx = require("docx");
+const sharp = require("sharp");
 const {
   Document, Packer, Paragraph, TextRun, AlignmentType,
   PageBreak, ImageRun, Header, Footer, PageNumber,
@@ -37,10 +38,10 @@ app.get('/health', (req, res) => res.json({ ok: true, porta: PORT }));
 
 app.post('/gerar-docx', async (req, res) => {
   const { laudo_id } = req.body;
-  if (!laudo_id) return res.status(400).json({ erro: 'laudo_id obrigatório' });
+  if (!laudo_id) return res.status(400).json({ erro: 'laudo_id obrigatorio' });
   try {
     const { data: laudo, error: le } = await supabase.from('laudos').select('*').eq('id', laudo_id).single();
-    if (le || !laudo) return res.status(404).json({ erro: 'Laudo não encontrado' });
+    if (le || !laudo) return res.status(404).json({ erro: 'Laudo nao encontrado' });
     const { data: perfil } = await supabase.from('profiles').select('*').eq('id', laudo.user_id).single();
     const { data: fotos } = await supabase.from('fotos').select('*').eq('laudo_id', laudo_id).order('ordem', { ascending: true });
     const doc = await montarDocumento(laudo, perfil, fotos || []);
@@ -73,9 +74,9 @@ async function montarDocumento(laudo, perfil, fotos) {
   const crea    = perfil?.crea || '';
   const uf      = perfil?.uf_crea || 'SP';
   const empresa = '';
-  const cidade  = perfil?.cidade_atuacao || 'São Paulo';
-  const rawTipo = laudo.tipo || 'LAUDO DE VISTORIA DE CONSTATAÇÃO';
-  const tipo    = rawTipo.split('\n').map(l => l.replace(/^#+\s*/, '').trim()).filter(Boolean)[0]?.toUpperCase() || 'LAUDO DE VISTORIA DE CONSTATAÇÃO';
+  const cidade  = perfil?.cidade_atuacao || 'Sao Paulo';
+  const rawTipo = laudo.tipo || 'LAUDO DE VISTORIA DE CONSTATACAO';
+  const tipo    = rawTipo.split('\n').map(l => l.replace(/^#+\s*/, '').trim()).filter(Boolean)[0]?.toUpperCase() || 'LAUDO DE VISTORIA DE CONSTATACAO';
   const endereco = laudo.endereco || '';
   const cliente  = laudo.cliente || '';
 
@@ -91,7 +92,7 @@ async function montarDocumento(laudo, perfil, fotos) {
     alignment: 'center',
     spacing: { before: 400, after: 200, line: L1 },
     children: [new TextRun({
-      text: 'LAUDO TÉCNICO',
+      text: 'LAUDO TECNICO',
       font: F, size: PT18, bold: true, color: '000000',
     })],
   }));
@@ -119,7 +120,7 @@ async function montarDocumento(laudo, perfil, fotos) {
     }));
   }
 
-  if (cidade && cidade !== 'São Paulo') {
+  if (cidade && cidade !== 'Sao Paulo') {
     filhos.push(new Paragraph({
       alignment: 'center',
       spacing: { before: 0, after: 600, line: L1 },
@@ -185,7 +186,7 @@ async function montarDocumento(laudo, perfil, fotos) {
           width: { size: 4536, type: WidthType.DXA },
           margins: { top: 60, bottom: 120, left: 160, right: 160 },
           children: [
-            new Paragraph({ children: [new TextRun({ text: 'Versão', font: F, size: PT10, color: '666666' })] }),
+            new Paragraph({ children: [new TextRun({ text: 'Versao', font: F, size: PT10, color: '666666' })] }),
             new Paragraph({ children: [new TextRun({ text: 'final', font: F, size: PT12, italics: true })] }),
           ],
         }),
@@ -216,8 +217,7 @@ async function montarDocumento(laudo, perfil, fotos) {
 
   filhos.push(new Paragraph({ children: [new PageBreak()] }));
 
-  // Pré-download de todas as fotos via Supabase client (bucket privado — service role)
-  const fotoBuffers = new Map(); // idx -> { buf, tipoImg }
+  const fotoBuffers = new Map();
   for (let idx = 0; idx < fotos.length; idx++) {
     const foto = fotos[idx];
     try {
@@ -226,8 +226,18 @@ async function montarDocumento(laudo, perfil, fotos) {
       const { data: fileData, error: fileErr } = await supabase.storage.from('fotos').download(storagePath);
       if (fileErr) throw fileErr;
       const imgBuf = Buffer.from(await fileData.arrayBuffer());
-      const ext = storagePath.split('.').pop()?.toLowerCase();
-      fotoBuffers.set(idx, { buf: imgBuf, tipoImg: ext === 'png' ? 'png' : 'jpeg' });
+
+      let resizedBuf = imgBuf;
+      try {
+        resizedBuf = await sharp(imgBuf)
+          .resize(1200, 900, { fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 85 })
+          .toBuffer();
+      } catch (sharpErr) {
+        console.warn(`Sharp resize foto ${idx + 1}:`, sharpErr.message);
+      }
+
+      fotoBuffers.set(idx, { buf: resizedBuf, tipoImg: 'jpeg' });
     } catch (e) { console.warn(`Download foto ${idx + 1}:`, e.message); }
   }
 
@@ -274,15 +284,12 @@ async function montarDocumento(laudo, perfil, fotos) {
     if (primeiraSecaoIdx >= 0) {
       linhasProcessar = linhas.slice(primeiraSecaoIdx);
     } else {
-      // Sem seções numeradas em markdown — pular cabeçalhos da IA no início
       let skipIdx = 0;
       for (let i = 0; i < linhas.length; i++) {
         const trim = linhas[i].trim();
         if (!trim || trim === '---') { skipIdx = i + 1; continue; }
-        // Pular headings markdown sem número (ex: "# ANÁLISE DE CAUSALIDADE")
         if (/^#{1,3}\s+(?!\d)/.test(trim)) { skipIdx = i + 1; continue; }
-        // Pular linhas em CAIXA ALTA pura (tipo do laudo repetido pela IA, ex: "ANÁLISE DE CAUSALIDADE")
-        if (/^[A-ZÁÀÂÃÉÊÍÓÔÕÚÇÜ\s\-–—\/]+$/.test(trim) && trim.length > 3) { skipIdx = i + 1; continue; }
+        if (/^[A-Z\s\-]+$/.test(trim) && trim.length > 3) { skipIdx = i + 1; continue; }
         break;
       }
       linhasProcessar = linhas.slice(skipIdx);
@@ -292,7 +299,6 @@ async function montarDocumento(laudo, perfil, fotos) {
       const trim = linha.trim();
       if (!trim || trim === '---') continue;
 
-      // Placeholder de foto inline: [FOTO 1], [FOTO_1], [FIGURA 1], etc.
       const mFoto = trim.match(/^\[(?:FOTO|FIGURA|IMAGEM)[_\s]*(\d+)\]$/i);
       if (mFoto) {
         const fIdx = parseInt(mFoto[1]) - 1;
@@ -307,7 +313,7 @@ async function montarDocumento(laudo, perfil, fotos) {
       } else if (trim.startsWith('# ')) {
         filhos.push(paraH1(trim.replace(/^#+\s*/, '')));
       } else if (trim.startsWith('- ') || trim.startsWith('• ')) {
-        filhos.push(paraBullet(trim.replace(/^[-•]\s*/, ''), linha));
+        filhos.push(paraBullet(trim.replace(/^[-•]\s*/, '')));
       } else if (/^[a-z]\)\s/.test(trim) || /^\d+\.\s/.test(trim)) {
         filhos.push(paraListaNum(trim));
       } else {
@@ -316,13 +322,11 @@ async function montarDocumento(laudo, perfil, fotos) {
     }
   }
 
-
-  // 4. Encerramento + Assinatura
   filhos.push(new Paragraph({ children: [new PageBreak()] }));
   filhos.push(paraH1('ENCERRAMENTO'));
 
   filhos.push(paraCorpo(
-    `O presente laudo foi elaborado em conformidade com a ABNT NBR 13752:2024 e demais normas técnicas aplicáveis, representando a expressão técnica das condições verificadas na data da vistoria.`
+    'O presente laudo foi elaborado em conformidade com a ABNT NBR 13752:2024 e demais normas tecnicas aplicaveis, representando a expressao tecnica das condicoes verificadas na data da vistoria.'
   ));
 
   filhos.push(pVazio());
@@ -358,7 +362,6 @@ async function montarDocumento(laudo, perfil, fotos) {
     children: [new TextRun({ text: `CREA-${uf} ${crea}`, font: F, size: PT12 })],
   }));
 
-  // 5. Anexos
   filhos.push(new Paragraph({ children: [new PageBreak()] }));
   filhos.push(paraH1('ANEXOS'));
 
@@ -370,7 +373,6 @@ async function montarDocumento(laudo, perfil, fotos) {
   filhos.push(paraCorpo(''));
   filhos.push(paraCorpo(''));
   filhos.push(paraCorpo(''));
-
   filhos.push(pVazio());
 
   return new Document({
@@ -439,7 +441,7 @@ function montarRodape(nome, empresa) {
           new TextRun({ text: empresa ? `${empresa}  |  ` : '', font: F, size: PT9, color: '666666' }),
           new TextRun({ text: `Eng. ${nome}`, font: F, size: PT9, color: '666666' }),
           new TextRun({ text: '\t', font: F, size: PT9 }),
-          new TextRun({ text: 'Página ', font: F, size: PT9, color: '666666' }),
+          new TextRun({ text: 'Pagina ', font: F, size: PT9, color: '666666' }),
           new TextRun({ children: [PageNumber.CURRENT], font: F, size: PT9, color: '666666' }),
           new TextRun({ text: ' de ', font: F, size: PT9, color: '666666' }),
           new TextRun({ children: [PageNumber.TOTAL_PAGES], font: F, size: PT9, color: '666666' }),
@@ -482,7 +484,7 @@ function paraCorpo(texto) {
   });
 }
 
-function paraBullet(texto, linhaOriginal) {
+function paraBullet(texto) {
   return new Paragraph({
     alignment: 'both',
     numbering: { reference: 'bullets', level: 0 },
@@ -530,19 +532,6 @@ function formatarData(iso) {
 function laudo_id_curto(id) {
   if (!id) return '—';
   return id.slice(0, 8).toUpperCase();
-}
-
-function downloadUrl(url) {
-  return new Promise((resolve, reject) => {
-    const lib = url.startsWith('https') ? https_mod : http_mod;
-    lib.get(url, (res) => {
-      if (res.statusCode !== 200) { reject(new Error('HTTP ' + res.statusCode)); return; }
-      const chunks = [];
-      res.on('data', chunk => chunks.push(chunk));
-      res.on('end', () => resolve(Buffer.concat(chunks)));
-      res.on('error', reject);
-    }).on('error', reject);
-  });
 }
 
 app.listen(PORT, '0.0.0.0', () => console.log(`LaudoFlow Word Service rodando na porta ${PORT}`));
