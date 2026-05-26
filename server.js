@@ -223,6 +223,7 @@ async function montarDocumento(laudo, perfil, fotos) {
     try {
       const storagePath = foto.url || '';
       if (!storagePath) continue;
+      console.log(`[foto ${idx + 1}] downloading: ${storagePath}`);
       const { data: fileData, error: fileErr } = await supabase.storage.from('fotos').download(storagePath);
       if (fileErr) throw fileErr;
       const imgBuf = Buffer.from(await fileData.arrayBuffer());
@@ -238,7 +239,7 @@ async function montarDocumento(laudo, perfil, fotos) {
       }
 
       fotoBuffers.set(idx, { buf: resizedBuf, tipoImg: 'jpeg' });
-    } catch (e) { console.warn(`Download foto ${idx + 1}:`, e.message); }
+    } catch (e) { console.error(`[foto ${idx + 1}] erro no download:`, e); }
   }
 
   function descricaoFoto(foto) {
