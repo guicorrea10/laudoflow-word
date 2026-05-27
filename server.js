@@ -357,10 +357,13 @@ async function montarDocumento(laudo, perfil, fotos) {
       const trim = linha.trim();
       if (!trim || trim === '---') continue;
 
-      const mFoto = trim.match(/^\[(?:FOTO|FIGURA|IMAGEM)[_\s]*(\d+)\]$/i);
-      if (mFoto) {
-        const fIdx = parseInt(mFoto[1]) - 1;
-        if (fotos[fIdx]) filhos.push(...paragrafosImagem(fIdx, fotos[fIdx]));
+      // Aceita múltiplos marcadores na mesma linha: [FOTO 1] [FOTO 2] [FOTO 3]
+      const todosMarcadores = [...trim.matchAll(/\[(?:FOTO|FIGURA|IMAGEM)[_\s]*(\d+)\]/gi)];
+      if (todosMarcadores.length > 0) {
+        for (const m of todosMarcadores) {
+          const fIdx = parseInt(m[1]) - 1;
+          if (fotos[fIdx]) filhos.push(...paragrafosImagem(fIdx, fotos[fIdx]));
+        }
         continue;
       }
 
