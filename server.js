@@ -69,6 +69,24 @@ app.post('/gerar-docx', async (req, res) => {
   }
 });
 
+// ─── CORRECAO: extrai o storage path a partir da URL pública ─────────────────
+// O campo foto.url pode conter a URL pública completa do Supabase,
+// ex: https://xxx.supabase.co/storage/v1/object/public/fotos/laudos/abc/foto.JPG
+// O download via SDK precisa apenas do path relativo: laudos/abc/foto.JPG
+function extrairStoragePath(urlOuPath) {
+  if (!urlOuPath) return null;
+  // Se já é um path relativo (não começa com http), retorna direto
+  if (!urlOuPath.startsWith('http')) return urlOuPath;
+  // Extrai tudo após "/object/public/fotos/" ou "/object/sign/fotos/"
+  const match = urlOuPath.match(/\/object\/(?:public|sign)\/fotos\/(.+?)(?:\?|$)/);
+  if (match) return match[1];
+  // Fallback: extrai após "/fotos/"
+  const fallback = urlOuPath.match(/\/fotos\/(.+?)(?:\?|$)/);
+  if (fallback) return fallback[1];
+  return urlOuPath;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 async function montarDocumento(laudo, perfil, fotos) {
   const nome    = perfil?.nome_completo || 'Engenheiro';
   const crea    = perfil?.crea || '';
@@ -217,34 +235,66 @@ async function montarDocumento(laudo, perfil, fotos) {
 
   filhos.push(new Paragraph({ children: [new PageBreak()] }));
 
+  // ─── DOWNLOAD DAS FOTOS ───────────────────────────────────────────────────
   const fotoBuffers = new Map();
+  console.log(`[docx] Iniciando download de ${fotos.length} fotos...`);
+
   for (let idx = 0; idx < fotos.length; idx++) {
     const foto = fotos[idx];
     try {
-      const storagePath = foto.url || '';
-      if (!storagePath) continue;
-      console.log(`[foto ${idx + 1}] downloading: ${storagePath}`);
-      const ext = storagePath.split('.').pop().toLowerCase();
-      const tipoOriginal = ext === 'png' ? 'png' : 'jpeg';
-      const { data: fileData, error: fileErr } = await supabase.storage.from('fotos').download(storagePath);
-      if (fileErr) throw fileErr;
+      const rawUrl = foto.url || '';
+      if (!rawUrl) {
+        console.warn(`[foto ${idx + 1}] url vazia, pulando`);
+        continue;
+      }
+
+      // CORRECAO PRINCIPAL: extrai o storage path relativo da URL
+      const storagePath = extrairStoragePath(rawUrl);
+      if (!storagePath) {
+        console.warn(`[foto ${idx + 1}] nao foi possivel extrair storage path de: ${rawUrl}`);
+        continue;
+      }
+
+      console.log(`[foto ${idx + 1}] storage path: ${storagePath}`);
+
+      const { data: fileData, error: fileErr } = await supabase.storage
+        .from('fotos')
+        .download(storagePath);
+
+      if (fileErr) {
+        console.error(`[foto ${idx + 1}] ERRO download:`, fileErr.message);
+        continue;
+      }
+
       const imgBuf = Buffer.from(await fileData.arrayBuffer());
+      console.log(`[foto ${idx + 1}] baixada OK — ${imgBuf.length} bytes`);
 
       let resizedBuf = imgBuf;
-      let tipoImg = tipoOriginal;
+      let tipoImg = 'jpeg';
+
       try {
         resizedBuf = await sharp(imgBuf)
           .resize(1200, 900, { fit: 'inside', withoutEnlargement: true })
           .jpeg({ quality: 85 })
           .toBuffer();
         tipoImg = 'jpeg';
+        console.log(`[foto ${idx + 1}] sharp OK — ${resizedBuf.length} bytes`);
       } catch (sharpErr) {
-        console.warn(`Sharp resize foto ${idx + 1}:`, sharpErr.message);
+        console.warn(`[foto ${idx + 1}] sharp falhou, usando original:`, sharpErr.message);
+        // Detecta tipo pelo path como fallback
+        const ext = storagePath.split('.').pop().toLowerCase();
+        tipoImg = ext === 'png' ? 'png' : 'jpeg';
       }
 
       fotoBuffers.set(idx, { buf: resizedBuf, tipoImg });
-    } catch (e) { console.error(`[foto ${idx + 1}] erro no download:`, e); }
+
+    } catch (e) {
+      console.error(`[foto ${idx + 1}] erro inesperado:`, e.message || e);
+    }
   }
+
+  console.log(`[docx] ${fotoBuffers.size} de ${fotos.length} fotos carregadas com sucesso`);
+  // ─────────────────────────────────────────────────────────────────────────
 
   function descricaoFoto(foto) {
     const limpaDesc = s => String(s).replace(/^(?:foto|figura)\s*\d+\s*[-—:]\s*/i, '').trim().slice(0, 100);
@@ -255,7 +305,10 @@ async function montarDocumento(laudo, perfil, fotos) {
 
   function paragrafosImagem(idx, foto) {
     const entry = fotoBuffers.get(idx);
-    if (!entry) return [];
+    if (!entry) {
+      console.warn(`[docx] sem buffer para foto ${idx + 1}, marcador omitido`);
+      return [];
+    }
     const desc = descricaoFoto(foto);
     return [
       new Paragraph({
