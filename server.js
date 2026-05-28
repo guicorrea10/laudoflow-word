@@ -298,6 +298,7 @@ async function montarDocumento(laudo, perfil, fotos) {
 
   function descricaoFoto(foto) {
     const limpaDesc = s => String(s).replace(/^(?:foto|figura)\s*\d+\s*[-—:]\s*/i, '').trim().slice(0, 200);
+    if (foto.titulo) return limpaDesc(foto.titulo);
     if (foto.observacao_engenheiro) return limpaDesc(foto.observacao_engenheiro);
     if (foto.texto_ia) return limpaDesc(foto.texto_ia);
     return '';
