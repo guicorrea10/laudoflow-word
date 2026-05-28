@@ -367,7 +367,7 @@ async function montarDocumento(laudo, perfil, fotos) {
         continue;
       }
 
-      if (trim.startsWith('### ')) {
+      if (trim.startsWith('#### ') || trim.startsWith('### ')) {
         filhos.push(paraH3(trim.replace(/^#+\s*/, '')));
       } else if (trim.startsWith('## ')) {
         filhos.push(paraH2(trim.replace(/^#+\s*/, '')));
